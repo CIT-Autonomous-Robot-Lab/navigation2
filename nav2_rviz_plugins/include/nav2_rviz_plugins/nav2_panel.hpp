@@ -37,6 +37,7 @@
 #include "tf2_ros/transform_listener.h"
 #include "tf2_ros/create_timer_ros.h"
 #include "tf2_ros/buffer.h"
+#include "std_srvs/srv/set_bool.hpp"
 
 class QPushButton;
 
@@ -78,6 +79,16 @@ private Q_SLOTS:
   void initialStateHandler();
 
 private:
+    bool convert_to_bool_wait(std_msgs::msg::Bool & wait);
+    std_msgs::msg::Bool convert_to_msg_wait(bool wait);
+    void resume_service_callback_();
+    rclcpp::Service<std_srvs::srv::SetBool>::SharedPtr pause_resume_wp_service_client_;
+    rclcpp::Client<std_srvs::srv::SetBool>::SharedPtr waypoint_waiter_client_;
+    std::vector<std_msgs::msg::Bool> acummulated_waits_;
+    std::vector<std_msgs::msg::Bool> store_waits_;
+    void pause_resume_wp_callback_(const std::shared_ptr<rmw_request_id_t> request_handler, const std::shared_ptr<std_srvs::srv::SetBool::Request> request, const std::shared_ptr<std_srvs::srv::SetBool::Response> response);
+    void checkStateStatus();
+
   void loadLogFiles();
   void onCancelButtonPressed();
   void timerEvent(QTimerEvent * event) override;
@@ -96,7 +107,7 @@ private:
   geometry_msgs::msg::PoseStamped convert_to_msg(
     std::vector<double> pose,
     std::vector<double> orientation);
-  void startWaypointFollowing(std::vector<geometry_msgs::msg::PoseStamped> poses);
+  void startWaypointFollowing(std::vector<geometry_msgs::msg::PoseStamped> poses, std::vector<std_msgs::msg::Bool> waits);
   void startNavigation(geometry_msgs::msg::PoseStamped);
   void startNavThroughPoses(std::vector<geometry_msgs::msg::PoseStamped> poses);
   using NavigationGoalHandle =

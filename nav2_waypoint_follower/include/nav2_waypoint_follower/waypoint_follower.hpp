@@ -32,6 +32,8 @@
 #include "nav2_core/waypoint_task_executor.hpp"
 #include "pluginlib/class_loader.hpp"
 #include "pluginlib/class_list_macros.hpp"
+#include "rclcpp/rclcpp.hpp"
+#include "std_srvs/srv/set_bool.hpp"
 
 namespace nav2_waypoint_follower
 {
@@ -130,6 +132,11 @@ protected:
    */
   rcl_interfaces::msg::SetParametersResult
   dynamicParametersCallback(std::vector<rclcpp::Parameter> parameters);
+  bool stopping_waypoint(bool);
+
+  rclcpp::Node::SharedPtr waypoint_follower_node_;
+  rclcpp::Client<std_srvs::srv::SetBool>::SharedPtr pause_resume_wp_service_client_;
+
 
   // Dynamic parameters handler
   rclcpp::node_interfaces::OnSetParametersCallbackHandle::SharedPtr dyn_params_handler_;

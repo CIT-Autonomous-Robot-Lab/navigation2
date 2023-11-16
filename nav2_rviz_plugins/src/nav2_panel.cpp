@@ -47,7 +47,7 @@ Nav2Panel::Nav2Panel(QWidget * parent)
   server_timeout_(100)
 {
   // Create the control button and its tooltip
-
+    using namespace std::placeholders;
   start_reset_button_ = new QPushButton;
   pause_resume_button_ = new QPushButton;
   navigation_mode_button_ = new QPushButton;
@@ -460,6 +460,7 @@ Nav2Panel::Nav2Panel(QWidget * parent)
     "lifecycle_manager_localization", client_node_);
   initial_thread_ = new InitialThread(client_nav_, client_loc_);
   connect(initial_thread_, &InitialThread::finished, initial_thread_, &QObject::deleteLater);
+  pause_resume_wp_service_client_ = client_node_->create_service<std_srvs::srv::SetBool>("_", std::bind(&Nav2Panel::pause_resume_wp_callback_, this, _1, _2, _3));
 
   QSignalTransition * activeSignal = new QSignalTransition(
     initial_thread_,
@@ -696,11 +697,25 @@ void Nav2Panel::handleGoalLoader()
     auto waypoint = waypoint_iter[it->first.as<std::string>()];
     auto pose = waypoint["pose"].as<std::vector<double>>();
     auto orientation = waypoint["orientation"].as<std::vector<double>>();
+    bool wait = waypoint["wait"].as<bool>();
+    acummulated_waits_.push_back(convert_to_msg_wait(wait));
     acummulated_poses_.push_back(convert_to_msg(pose, orientation));
   }
 
   // Publishing Waypoint Navigation marker after loading wp's
   updateWpNavigationMarkers();
+}
+
+bool Nav2Panel::convert_to_bool_wait(std_msgs::msg::Bool & wait)
+{
+    return wait.data;
+}
+
+std_msgs::msg::Bool Nav2Panel::convert_to_msg_wait(bool wait)
+{
+    std_msgs::msg::Bool msg = std_msgs::msg::Bool();
+    msg.data = wait;
+    return msg;
 }
 
 geometry_msgs::msg::PoseStamped Nav2Panel::convert_to_msg(
@@ -754,6 +769,9 @@ void Nav2Panel::handleGoalSaver()
     {acummulated_poses_[i].pose.orientation.w, acummulated_poses_[i].pose.orientation.x,
       acummulated_poses_[i].pose.orientation.y, acummulated_poses_[i].pose.orientation.z};
     out << YAML::Value << orientation;
+    out << YAML::Key << "wait";
+    bool wait = convert_to_bool_wait(acummulated_waits_[i]);
+    out << YAML::Value <<wait;
     out << YAML::EndMap;
   }
 
@@ -829,6 +847,7 @@ Nav2Panel::onInitialize()
         msg->status_list.back().status == action_msgs::msg::GoalStatus::STATUS_SUCCEEDED)
       {
         store_poses_.clear();
+        store_waits_.clear();
         waypoint_status_indicator_->clear();
         loop_no_ = "0";
         loop_count_ = 0;
@@ -925,6 +944,8 @@ Nav2Panel::onCancel()
       this));
   waypoint_status_indicator_->clear();
   store_poses_.clear();
+  store_waits_.clear();
+  acummulated_waits_.clear();
   acummulated_poses_.clear();
 }
 
@@ -936,6 +957,7 @@ void Nav2Panel::onResumedWp()
       &Nav2Panel::onCancelButtonPressed,
       this));
   acummulated_poses_ = store_poses_;
+  acummulated_waits_ = store_waits_;
   loop_no_ = std::to_string(
     stoi(nr_of_loops_->displayText().toStdString()) -
     loop_count_);
@@ -954,13 +976,17 @@ Nav2Panel::onNewGoal(double x, double y, double theta, QString frame)
   pose.pose.position.y = y;
   pose.pose.position.z = 0.0;
   pose.pose.orientation = orientationAroundZAxis(theta);
+  bool wait_bool = false;
+  std_msgs::msg::Bool wait = convert_to_msg_wait(wait_bool);
 
   if (store_poses_.empty()) {
     if (state_machine_.configuration().contains(accumulating_)) {
       waypoint_status_indicator_->clear();
       acummulated_poses_.push_back(pose);
+      acummulated_waits_.push_back(wait);
     } else {
       acummulated_poses_.clear();
+      acummulated_waits_.clear();
       updateWpNavigationMarkers();
       std::cout << "Start navigation" << std::endl;
       startNavigation(pose);
@@ -1074,7 +1100,11 @@ Nav2Panel::onAccumulatedWp()
       initial_pose.pose.orientation.z = init_transform.transform.rotation.z;
       initial_pose.pose.orientation.w = init_transform.transform.rotation.w;
 
+      bool initial_wait_bool = false;
+      std_msgs::msg::Bool initial_wait = convert_to_msg_wait(initial_wait_bool);
+
       // inserting the acummulated pose
+      acummulated_waits_.insert(acummulated_waits_.begin(), initial_wait);
       acummulated_poses_.insert(acummulated_poses_.begin(), initial_pose);
       updateWpNavigationMarkers();
       initial_pose_stored_ = true;
@@ -1085,12 +1115,15 @@ Nav2Panel::onAccumulatedWp()
       acummulated_poses_.erase(
         acummulated_poses_.begin(),
         acummulated_poses_.begin());
+      acummulated_waits_.erase(
+        acummulated_waits_.begin(),
+        acummulated_waits_.begin());
     }
   } else {
     std::cout << "Resuming waypoint" << std::endl;
   }
 
-  startWaypointFollowing(acummulated_poses_);
+  startWaypointFollowing(acummulated_poses_, acummulated_waits_);
   store_poses_ = acummulated_poses_;
   acummulated_poses_.clear();
 }
@@ -1105,6 +1138,8 @@ Nav2Panel::onAccumulatedNTP()
 void
 Nav2Panel::onAccumulating()
 {
+  acummulated_waits_.clear();
+  store_waits_.clear();
   acummulated_poses_.clear();
   store_poses_.clear();
   loop_count_ = 0;
@@ -1185,7 +1220,7 @@ Nav2Panel::timerEvent(QTimerEvent * event)
 }
 
 void
-Nav2Panel::startWaypointFollowing(std::vector<geometry_msgs::msg::PoseStamped> poses)
+Nav2Panel::startWaypointFollowing(std::vector<geometry_msgs::msg::PoseStamped> poses, std::vector<std_msgs::msg::Bool> waits)
 {
   auto is_action_server_ready =
     waypoint_follower_action_client_->wait_for_action_server(std::chrono::seconds(5));
@@ -1198,6 +1233,7 @@ Nav2Panel::startWaypointFollowing(std::vector<geometry_msgs::msg::PoseStamped> p
 
   // Send the goal poses
   waypoint_follower_goal_.poses = poses;
+  waypoint_follower_goal_.waits = waits;
   waypoint_follower_goal_.goal_index = goal_index_;
   waypoint_follower_goal_.number_of_loops = stoi(loop_no_);
 
@@ -1438,6 +1474,21 @@ Nav2Panel::updateWpNavigationMarkers()
   }
 
   wp_navigation_markers_pub_->publish(std::move(marker_array));
+}
+
+void Nav2Panel::pause_resume_wp_callback_(const std::shared_ptr<rmw_request_id_t> request_header, const std::shared_ptr<std_srvs::srv::SetBool::Request> request, const std::shared_ptr<std_srvs::srv::SetBool::Response> response)
+{
+    (void)request_header;
+    response->success = true;
+    RCLCPP_INFO(client_node_->get_logger(), "Receive request->data(%s)", request->data ? "true" : "false");
+    if(!request->data && !accumulated_wp_->active())
+    {
+        response->message = "Restart";
+    }
+    if(request->data && !resumed_wp_->active())
+    {
+        response->message = "Stop";
+    }
 }
 
 inline QString

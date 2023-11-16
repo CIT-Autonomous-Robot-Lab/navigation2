@@ -32,6 +32,9 @@ WaypointFollower::WaypointFollower(const rclcpp::NodeOptions & options)
   waypoint_task_executor_loader_("nav2_waypoint_follower",
     "nav2_core::WaypointTaskExecutor")
 {
+    waypoint_follower_node_ = std::make_shared<rclcpp::Node>("waypoint_follower_node");
+    pause_resume_wp_service_client_ = waypoint_follower_node_->create_client<std_srvs::srv::SetBool>("/motor_power");
+
   RCLCPP_INFO(get_logger(), "Creating");
 
   declare_parameter("stop_on_failure", true);
@@ -136,6 +139,7 @@ WaypointFollower::on_cleanup(const rclcpp_lifecycle::State & /*state*/)
 
   action_server_.reset();
   nav_to_pose_client_.reset();
+  pause_resume_wp_service_client_.reset();
 
   return nav2_util::CallbackReturn::SUCCESS;
 }
@@ -243,6 +247,8 @@ WaypointFollower::followWaypoints()
         goal_index);
       bool is_task_executed = waypoint_task_executor_->processAtWaypoint(
         goal->poses[goal_index], goal_index);
+      auto wait = goal->waits[goal_index].data;
+      is_task_executed |= stopping_waypoint(wait);
       RCLCPP_INFO(
         get_logger(), "Task execution at waypoint %i %s", goal_index,
         is_task_executed ? "succeeded" : "failed!");
@@ -364,6 +370,16 @@ WaypointFollower::dynamicParametersCallback(std::vector<rclcpp::Parameter> param
   result.successful = true;
   return result;
 }
+
+bool WaypointFollower::stopping_waypoint(bool wait)
+{
+    auto pause_resume_wp_service_request = std::make_shared<std_srvs::srv::SetBool::Request>();
+    pause_resume_wp_service_request->data = wait ? true : false;
+    auto pause_resume_wp_server_future = pause_resume_wp_service_client_->async_send_request(pause_resume_wp_service_request);
+    RCLCPP_INFO(waypoint_follower_node_->get_logger(), "request->data(%s)", pause_resume_wp_service_request->data ? "true" : "false");
+    return true;
+}
+
 
 }  // namespace nav2_waypoint_follower
 
