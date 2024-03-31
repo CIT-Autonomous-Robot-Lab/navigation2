@@ -44,7 +44,8 @@ GoalPoseUpdater GoalUpdater;
 
 Nav2Panel::Nav2Panel(QWidget * parent)
 : Panel(parent),
-  server_timeout_(100)
+  server_timeout_(100),
+  has_executed_transition_(false)
 {
   // Create the control button and its tooltip
 
@@ -368,7 +369,7 @@ Nav2Panel::Nav2Panel(QWidget * parent)
   QObject::connect(paused_, SIGNAL(entered()), this, SLOT(onPause()));
   QObject::connect(resumed_, SIGNAL(exited()), this, SLOT(onResume()));
   QObject::connect(accumulating_, SIGNAL(entered()), this, SLOT(onAccumulating()));
-  QObject::connect(accumulated_wp_, SIGNAL(entered()), this, SLOT(onAccumulatedWp()));
+  // QObject::connect(accumulated_wp_, SIGNAL(entered()), this, SLOT(onAccumulatedWp()));
   QObject::connect(resumed_wp_, SIGNAL(entered()), this, SLOT(onResumedWp()));
   QObject::connect(
     accumulated_nav_through_poses_, SIGNAL(entered()), this,
@@ -508,7 +509,8 @@ Nav2Panel::Nav2Panel(QWidget * parent)
   state_machine_.addState(accumulated_nav_through_poses_);
   state_machine_.addState(resumed_wp_);
 
-  state_machine_.setInitialState(pre_initial_);
+  // state_machine_.setInitialState(pre_initial_);
+  state_machine_.setInitialState(accumulating_);
 
   // delay starting initial thread until state machine has started or a race occurs
   QObject::connect(&state_machine_, SIGNAL(started()), this, SLOT(startThread()));
@@ -601,6 +603,24 @@ Nav2Panel::~Nav2Panel()
 {
 }
 
+void Nav2Panel::executeDelayedTransition()
+{
+  if (!has_executed_transition_) {
+    connect(&delay_timer_, &QTimer::timeout, this, &Nav2Panel::addTransition_delay);
+    delay_timer_.start(15000);  // Wait for 5000 ms (5 seconds)
+    has_executed_transition_ = true;
+  }
+}
+
+void Nav2Panel::addTransition_delay()
+{
+  RCLCPP_INFO(client_node_->get_logger(), "\033[31mDelayed addTransition\033[0m");
+  accumulating_->addTransition(accumulated_wp_);
+  onAccumulatedWp();
+  delay_timer_.stop();  // Stop the timer
+  RCLCPP_INFO(client_node_->get_logger(), "\033[31mFinish Delayed addTransition\033[0m");
+}
+
 void Nav2Panel::initialStateHandler()
 {
   if (store_initial_pose_checkbox_->isChecked()) {
@@ -676,15 +696,16 @@ void Nav2Panel::handleGoalLoader()
 
   std::cout << "Loading Waypoints!" << std::endl;
 
-  QString file = QFileDialog::getOpenFileName(
-    this,
-    tr("Open File"), "",
-    tr("yaml(*.yaml);;All Files (*)"));
+  // QString file = QFileDialog::getOpenFileName(
+  //   this,
+  //   tr("Open File"), "",
+  //   tr("yaml(*.yaml);;All Files (*)"));
 
   YAML::Node available_waypoints;
 
   try {
-    available_waypoints = YAML::LoadFile(file.toStdString());
+    // change the path to the file
+    available_waypoints = YAML::LoadFile("/home/ikuo/raspicat_ws/museum_waypoint.yaml");
   } catch (const std::exception & ex) {
     std::cout << ex.what() << ", please select a valid file" << std::endl;
     updateWpNavigationMarkers();
@@ -706,6 +727,7 @@ void Nav2Panel::handleGoalLoader()
 geometry_msgs::msg::PoseStamped Nav2Panel::convert_to_msg(
   std::vector<double> pose,
   std::vector<double> orientation)
+  //const std::string& function)
 {
   auto msg = geometry_msgs::msg::PoseStamped();
 
@@ -717,9 +739,9 @@ geometry_msgs::msg::PoseStamped Nav2Panel::convert_to_msg(
   msg.pose.position.z = pose[2];
 
   msg.pose.orientation.w = orientation[0];
-  msg.pose.orientation.w = orientation[1];
-  msg.pose.orientation.w = orientation[2];
-  msg.pose.orientation.w = orientation[3];
+  msg.pose.orientation.x = orientation[1];
+  msg.pose.orientation.y = orientation[2];
+  msg.pose.orientation.z = orientation[3];
 
   return msg;
 }
@@ -1019,6 +1041,7 @@ Nav2Panel::onCancelButtonPressed()
 void
 Nav2Panel::onAccumulatedWp()
 {
+  RCLCPP_INFO(client_node_->get_logger(), "\033[31mON Accumulated Wp\033[0m");
   if (acummulated_poses_.empty()) {
     state_machine_.postEvent(new ROSActionQEvent(QActionState::INACTIVE));
     waypoint_status_indicator_->setText(
@@ -1112,7 +1135,9 @@ Nav2Panel::onAccumulating()
   initial_pose_stored_ = false;
   loop_counter_stop_ = true;
   goal_index_ = 0;
+  handleGoalLoader();
   updateWpNavigationMarkers();
+  executeDelayedTransition();
 }
 
 void

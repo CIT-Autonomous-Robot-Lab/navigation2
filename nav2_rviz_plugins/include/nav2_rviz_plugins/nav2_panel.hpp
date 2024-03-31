@@ -76,6 +76,8 @@ private Q_SLOTS:
   void handleGoalLoader();
   void loophandler();
   void initialStateHandler();
+  void executeDelayedTransition();
+  void addTransition_delay();
 
 private:
   void loadLogFiles();
@@ -167,6 +169,8 @@ private:
   QLineEdit * nr_of_loops_{nullptr};
 
   QStateMachine state_machine_;
+  QTimer delay_timer_;
+  bool has_executed_transition_;
   InitialThread * initial_thread_;
 
   QState * pre_initial_{nullptr};
