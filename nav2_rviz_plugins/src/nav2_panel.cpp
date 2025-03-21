@@ -676,17 +676,40 @@ void Nav2Panel::handleGoalLoader()
 
   std::cout << "Loading Waypoints!" << std::endl;
 
-  QString file = QFileDialog::getOpenFileName(
-    this,
-    tr("Open File"), "",
-    tr("yaml(*.yaml);;All Files (*)"));
-
   YAML::Node available_waypoints;
+  std::string file_path;
+  ////////////////////////////////////////////////////////////////////////
+  /////////////// ローカルファイルを直接指定するかどうか /////////////////
+  bool use_local_file = true;
+  std::string local_file_path = "/home/ryo/raspicat_ws/src/navigation2/waypoints/tsudanuma.yaml";
+  ////////////////////////////////////////////////////////////////////////
+  ////////////////////////////////////////////////////////////////////////
+  if (!use_local_file)
+  {
+    QString file = QFileDialog::getOpenFileName(
+        this,
+        tr("Open File"), "",
+        tr("yaml(*.yaml);;All Files (*)"));
+    file_path = file.toStdString();
+  }
+  else
+  {
+    file_path = local_file_path;
+  }
 
-  try {
-    available_waypoints = YAML::LoadFile(file.toStdString());
-    // available_waypoints = YAML::LoadFile("/home/ryo/raspicat_ws/src/maps/WPs_1.yaml");
-  } catch (const std::exception & ex) {
+  try
+  {
+    if (!file_path.empty())
+    {
+      available_waypoints = YAML::LoadFile(file_path);
+    }
+    else
+    {
+      throw std::runtime_error("ファイルが選択されていないか設定されていません");
+    }
+  }
+  catch (const std::exception &ex)
+  {
     std::cout << ex.what() << ", please select a valid file" << std::endl;
     updateWpNavigationMarkers();
     return;
@@ -702,7 +725,7 @@ void Nav2Panel::handleGoalLoader()
 
   // Publishing Waypoint Navigation marker after loading wp's
   updateWpNavigationMarkers();
-}
+  }
 
 geometry_msgs::msg::PoseStamped Nav2Panel::convert_to_msg(
   std::vector<double> pose,
