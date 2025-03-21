@@ -685,6 +685,7 @@ void Nav2Panel::handleGoalLoader()
 
   try {
     available_waypoints = YAML::LoadFile(file.toStdString());
+    // available_waypoints = YAML::LoadFile("/home/ryo/raspicat_ws/src/maps/WPs_1.yaml");
   } catch (const std::exception & ex) {
     std::cout << ex.what() << ", please select a valid file" << std::endl;
     updateWpNavigationMarkers();
@@ -717,9 +718,9 @@ geometry_msgs::msg::PoseStamped Nav2Panel::convert_to_msg(
   msg.pose.position.z = pose[2];
 
   msg.pose.orientation.w = orientation[0];
-  msg.pose.orientation.w = orientation[1];
-  msg.pose.orientation.w = orientation[2];
-  msg.pose.orientation.w = orientation[3];
+  msg.pose.orientation.x = orientation[1];
+  msg.pose.orientation.y = orientation[2];
+  msg.pose.orientation.z = orientation[3];
 
   return msg;
 }
